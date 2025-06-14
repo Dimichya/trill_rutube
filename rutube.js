@@ -2,218 +2,218 @@
 
 // Rutube Player API
 var RT = {
-	PlayerState: {
-		ENDED: 'stopped',
-		PLAYING: 'playing',
-		PAUSED: 'paused',
-		BUFFERING: 3,
-		CUED: 5,
-		AD_PLAYING: 'adStart',
-		AD_ENDED: 'adEnd',
-		UNSTARTED: -1
-	},
-	Player: function(containerId, options) {
-		this.container = document.getElementById(containerId);
-		this.options = options;
-		this.eventHandlers = options.events || {};
-		this.iframe = null;
-		this.ready = false;
-		// Состояния плеера
-		this.currentTime = 0;
-		this.duration = 0;
-		this.playbackQuality = 720;
-		this.playerState = RT.PlayerState.UNSTARTED;
-		this.qualityList = [];
-		this.initPlayer();
-	}
+    PlayerState: {
+        ENDED: 'stopped',
+        PLAYING: 'playing',
+        PAUSED: 'paused',
+        BUFFERING: 3,
+        CUED: 5,
+        AD_PLAYING: 'adStart',
+        AD_ENDED: 'adEnd',
+        UNSTARTED: -1
+    },
+    Player: function(containerId, options) {
+        this.container = document.getElementById(containerId);
+        this.options = options;
+        this.eventHandlers = options.events || {};
+        this.iframe = null;
+        this.ready = false;
+        // Состояния плеера
+        this.currentTime = 0;
+        this.duration = 0;
+        this.playbackQuality = 720;
+        this.playerState = RT.PlayerState.UNSTARTED;
+        this.qualityList = [];
+        this.initPlayer();
+    }
 };
 
 RT.Player.prototype = {
-	initPlayer: function() {
-		this.createIframe();
-		this.bindEvents();
-		this.setupQualityTracking();
-	},
-	createIframe: function() {
-		var iframe = document.createElement('iframe');
-		var src = 'https://rutube.ru/play/embed/' + this.options.videoId;
-		var params = [];
-		var pv = this.options.playerVars || {};
-		if (pv.start) params.push('t=' + pv.start);
-		if (pv.end) params.push('stopTime=' + pv.end);
-		if (pv.skinColor) params.push('skinColor=' + pv.skinColor);
-		if (pv.suggestedQuality) {
-			this.playbackQuality = pv.suggestedQuality;
-		}
-		if (this.options.privateKey) {
-			src += '/?p=' + encodeURIComponent(this.options.privateKey);
-		}
-		if (params.length) src += (src.includes('?') ? '&' : '?') + params.join('&');
-		iframe.setAttribute('src', src);
-		iframe.setAttribute('width', this.options.width || '100%');
-		iframe.setAttribute('height', this.options.height || '100%');
-		iframe.setAttribute('frameborder', '0');
-		iframe.setAttribute('webkitAllowFullScreen', '');
-		iframe.setAttribute('mozallowfullscreen', '');
-	 iframe.setAttribute('allowfullscreen', '');
-		iframe.setAttribute('allow', 'clipboard-write; autoplay');
-		this.container.appendChild(iframe);
-		this.iframe = iframe;
-	},
-	bindEvents: function() {
-		var self = this;
-		window.addEventListener('message', function(e) {
-			if (!self.iframe || e.source !== self.iframe.contentWindow) return;
-			try {
-				var message = JSON.parse(e.data);
-				switch(message.type) {
-					case 'player:ready':
-						self.handleReady(message);
-						break;
-					case 'player:adStart':
-						self.triggerEvent('onStateChange', { data: RT.PlayerState.AD_PLAYING });
-						break;
-					case 'player:adEnd':
-						self.triggerEvent('onStateChange', { data: RT.PlayerState.AD_ENDED });
-						if (self.playerState === RT.PlayerState.ENDED)
-							self.triggerEvent('onStateChange', { data: RT.PlayerState.ENDED });
-						break;
-					case 'player:changeState':
-						self.handleStateChange(message.data);
-						break;
-					case 'player:currentTime':
-						self.currentTime = message.data.time;
-						self.triggerEvent('onTimeUpdate', message.data);
-						break;
-					case 'player:durationChange':
-						self.duration = message.data.duration;
-						self.triggerEvent('onDurationChange', message.data);
-						break;
-					case 'player:currentQuality':
-						self.handleQualityChange(message.data);
-						break;
-					case 'player:qualityList':
-						self.qualityList = message.data.list;
-						self.triggerEvent('onQualityList', message.data.list);
-						break;
-					case 'player:error':
-						self.triggerEvent('onError', message.data);
-						break;
-				}
-			} catch(err) {
-				console.error('Error parsing message:', err);
-			}
-		});
-	},
-	handleReady: function(message) {
-		this.ready = true;
-		this.triggerEvent('onReady');
-		this.sendCommand({ type: 'player:getQualityList', data: {} });
-	},
-	handleStateChange: function(data) {
-		const stateMap = {
-			playing: RT.PlayerState.PLAYING,
-			paused: RT.PlayerState.PAUSED,
-			stopped: RT.PlayerState.ENDED,
-			lockScreenOn: RT.PlayerState.BUFFERING,
-			lockScreenOff: RT.PlayerState.PLAYING
-		};
-		if (stateMap[data.state]) {
-			this.playerState = stateMap[data.state];
-		}
-		this.triggerEvent('onStateChange', { data: this.playerState });
-	},
-	handleQualityChange: function(data) {
-		const newQuality = data.quality.height;
-		if (newQuality !== this.playbackQuality) {
-			this.playbackQuality = newQuality;
-			this.triggerEvent('onPlaybackQualityChange', { data: newQuality });
-		}
-	},
-	setupQualityTracking: function() {
-		setInterval(() => {
-			if (this.playerState === RT.PlayerState.PLAYING) {
-				this.triggerEvent('onTimeUpdate');
-			}
-		}, 250);
-	},
-	mapQuality: function(height) {
-		const qualityMap = {
-			144: 'tiny',
-			240: 'small',
-			360: 'medium',
-			480: 'large',
-			720: 'hd720',
-			1080: 'hd1080',
-			1440: 'hd1440',
-			2160: 'hd2160'
-		};
-		return qualityMap[height] || 'unknown';
-	},
-	setPlaybackQuality: function(quality) {
-		const heightMap = {
-			'tiny': 144,
-			'small': 240,
-			'medium': 360,
-			'large': 480,
-			'hd720': 720,
-			'hd1080': 1080,
-			'hd1440': 1440,
-			'hd2160': 2160
-		};
-		if (this.qualityList.length && (heightMap[quality] || Number.isInteger(quality))) {
-			var h = heightMap[quality] || quality;
-			var setQuality = this.qualityList.sort(function(a,b){return Math.abs(a - h) - Math.abs(b - h)})[0];
-			this.sendCommand({
-				type: 'player:changeQuality',
-				data: {quality: setQuality}
-			});
-		}
-	},
-	getAvailableQualityLevels: function() {
-		return this.qualityList.map(h => this.mapQuality(h));
-	},
-	sendCommand: function(command) {
-		if (!this.ready) return;
-		this.iframe.contentWindow.postMessage(JSON.stringify(command), '*');
-	},
-	getCurrentTime: function() {
-		return this.currentTime;
-	},
-	getDuration: function() {
-		return this.duration;
-	},
-	getPlayerState: function() {
-		return this.playerState;
-	},
-	getPlaybackQuality: function() {
-		return this.playbackQuality;
-	},
-	playVideo: function() {
-		this.sendCommand({ type: 'player:play', data: {} });
-	},
-	pauseVideo: function() {
-		this.sendCommand({ type: 'player:pause', data: {} });
-	},
-	stopVideo: function() {
-		this.sendCommand({ type: 'player:stop', data: {} });
-	},
-	seekTo: function(seconds) {
-		this.sendCommand({ type: 'player:setCurrentTime', data: { time: seconds } });
-	},
-	setVolume: function(volume) {
-		this.sendCommand({ type: 'player:setVolume', data: { volume: volume } });
-	},
-	addEventListener: function(event, handler) {
-		this.eventHandlers[event] = handler;
-	},
-	triggerEvent: function(event, data) {
-		if (this.eventHandlers[event]) {
-			if (!data) data = {};
-			data.target = this;
-			this.eventHandlers[event](data);
-		}
-	}
+    initPlayer: function() {
+        this.createIframe();
+        this.bindEvents();
+        this.setupQualityTracking();
+    },
+    createIframe: function() {
+        var iframe = document.createElement('iframe');
+        var src = 'https://rutube.ru/play/embed/' + this.options.videoId;
+        var params = [];
+        var pv = this.options.playerVars || {};
+        if (pv.start) params.push('t=' + pv.start);
+        if (pv.end) params.push('stopTime=' + pv.end);
+        if (pv.skinColor) params.push('skinColor=' + pv.skinColor);
+        if (pv.suggestedQuality) {
+            this.playbackQuality = pv.suggestedQuality;
+        }
+        if (this.options.privateKey) {
+            src += '/?p=' + encodeURIComponent(this.options.privateKey);
+        }
+        if (params.length) src += (src.includes('?') ? '&' : '?') + params.join('&');
+        iframe.setAttribute('src', src);
+        iframe.setAttribute('width', this.options.width || '100%');
+        iframe.setAttribute('height', this.options.height || '100%');
+        iframe.setAttribute('frameborder', '0');
+        iframe.setAttribute('webkitAllowFullScreen', '');
+        iframe.setAttribute('mozallowfullscreen', '');
+        iframe.setAttribute('allowfullscreen', '');
+        iframe.setAttribute('allow', 'clipboard-write; autoplay');
+        this.container.appendChild(iframe);
+        this.iframe = iframe;
+    },
+    bindEvents: function() {
+        var self = this;
+        window.addEventListener('message', function(e) {
+            if (!self.iframe || e.source !== self.iframe.contentWindow) return;
+            try {
+                var message = JSON.parse(e.data);
+                switch(message.type) {
+                    case 'player:ready':
+                        self.handleReady(message);
+                        break;
+                    case 'player:adStart':
+                        self.triggerEvent('onStateChange', { data: RT.PlayerState.AD_PLAYING });
+                        break;
+                    case 'player:adEnd':
+                        self.triggerEvent('onStateChange', { data: RT.PlayerState.AD_ENDED });
+                        if (self.playerState === RT.PlayerState.ENDED)
+                            self.triggerEvent('onStateChange', { data: RT.PlayerState.ENDED });
+                        break;
+                    case 'player:changeState':
+                        self.handleStateChange(message.data);
+                        break;
+                    case 'player:currentTime':
+                        self.currentTime = message.data.time;
+                        self.triggerEvent('onTimeUpdate', message.data);
+                        break;
+                    case 'player:durationChange':
+                        self.duration = message.data.duration;
+                        self.triggerEvent('onDurationChange', message.data);
+                        break;
+                    case 'player:currentQuality':
+                        self.handleQualityChange(message.data);
+                        break;
+                    case 'player:qualityList':
+                        self.qualityList = message.data.list;
+                        self.triggerEvent('onQualityList', message.data.list);
+                        break;
+                    case 'player:error':
+                        self.triggerEvent('onError', message.data);
+                        break;
+                }
+            } catch(err) {
+                console.error('Error parsing message:', err);
+            }
+        });
+    },
+    handleReady: function(message) {
+        this.ready = true;
+        this.triggerEvent('onReady');
+        this.sendCommand({ type: 'player:getQualityList', data: {} });
+    },
+    handleStateChange: function(data) {
+        const stateMap = {
+            playing: RT.PlayerState.PLAYING,
+            paused: RT.PlayerState.PAUSED,
+            stopped: RT.PlayerState.ENDED,
+            lockScreenOn: RT.PlayerState.BUFFERING,
+            lockScreenOff: RT.PlayerState.PLAYING
+        };
+        if (stateMap[data.state]) {
+            this.playerState = stateMap[data.state];
+        }
+        this.triggerEvent('onStateChange', { data: this.playerState });
+    },
+    handleQualityChange: function(data) {
+        const newQuality = data.quality.height;
+        if (newQuality !== this.playbackQuality) {
+            this.playbackQuality = newQuality;
+            this.triggerEvent('onPlaybackQualityChange', { data: newQuality });
+        }
+    },
+    setupQualityTracking: function() {
+        setInterval(() => {
+            if (this.playerState === RT.PlayerState.PLAYING) {
+                this.triggerEvent('onTimeUpdate');
+            }
+        }, 250);
+    },
+    mapQuality: function(height) {
+        const qualityMap = {
+            144: 'tiny',
+            240: 'small',
+            360: 'medium',
+            480: 'large',
+            720: 'hd720',
+            1080: 'hd1080',
+            1440: 'hd1440',
+            2160: 'hd2160'
+        };
+        return qualityMap[height] || 'unknown';
+    },
+    setPlaybackQuality: function(quality) {
+        const heightMap = {
+            'tiny': 144,
+            'small': 240,
+            'medium': 360,
+            'large': 480,
+            'hd720': 720,
+            'hd1080': 1080,
+            'hd1440': 1440,
+            'hd2160': 2160
+        };
+        if (this.qualityList.length && (heightMap[quality] || Number.isInteger(quality))) {
+            var h = heightMap[quality] || quality;
+            var setQuality = this.qualityList.sort(function(a,b){return Math.abs(a - h) - Math.abs(b - h)})[0];
+            this.sendCommand({
+                type: 'player:changeQuality',
+                data: {quality: setQuality}
+            });
+        }
+    },
+    getAvailableQualityLevels: function() {
+        return this.qualityList.map(h => this.mapQuality(h));
+    },
+    sendCommand: function(command) {
+        if (!this.ready) return;
+        this.iframe.contentWindow.postMessage(JSON.stringify(command), '*');
+    },
+    getCurrentTime: function() {
+        return this.currentTime;
+    },
+    getDuration: function() {
+        return this.duration;
+    },
+    getPlayerState: function() {
+        return this.playerState;
+    },
+    getPlaybackQuality: function() {
+        return this.playbackQuality;
+    },
+    playVideo: function() {
+        this.sendCommand({ type: 'player:play', data: {} });
+    },
+    pauseVideo: function() {
+        this.sendCommand({ type: 'player:pause', data: {} });
+    },
+    stopVideo: function() {
+        this.sendCommand({ type: 'player:stop', data: {} });
+    },
+    seekTo: function(seconds) {
+        this.sendCommand({ type: 'player:setCurrentTime', data: { time: seconds } });
+    },
+    setVolume: function(volume) {
+        this.sendCommand({ type: 'player:setVolume', data: { volume: volume } });
+    },
+    addEventListener: function(event, handler) {
+        this.eventHandlers[event] = handler;
+    },
+    triggerEvent: function(event, data) {
+        if (this.eventHandlers[event]) {
+            if (!data) data = {};
+            data.target = this;
+            this.eventHandlers[event](data);
+        }
+    }
 };
 
 // YouTubePlayer.js - исправленная версия для Rutube
@@ -638,10 +638,5 @@ function initRutubePlayer() {
   }
 }
 
-if (window.appready) {
-  initRutubePlayer();
-} else {
-  Lampa.Listener.follow('app', function(e) {
-    if (e.type == 'ready') initRutubePlayer();
-  });
-}
+// Автоматический запуск при загрузке скрипта
+initRutubePlayer();
